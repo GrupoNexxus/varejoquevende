@@ -3253,13 +3253,12 @@ var qrcode = function() {
 <script>
   // =====================================================================
   //  INSCRIÇÕES: configuração
-  //  Enquanto os campos abaixo estiverem vazios, o formulário funciona em
-  //  modo de demonstração (nada é salvo). Eles serão preenchidos na etapa
-  //  de configuração do Supabase e da planilha.
+  //  Supabase configurado. Enquanto SHEETS_WEBHOOK_URL estiver vazio, a
+  //  cópia na planilha do Google fica desligada (o Supabase salva normalmente).
   // =====================================================================
   var CONFIG = {
-    SUPABASE_URL: '',        // ex.: https://xxxx.supabase.co
-    SUPABASE_ANON_KEY: '',   // chave pública (anon) do projeto
+    SUPABASE_URL: 'https://dkpfgqnkxcqkkbhfahjh.supabase.co',
+    SUPABASE_ANON_KEY: 'sb_publishable_2E3z8g-jJLgZ2GmIA_zABg_Xf5IwvIw',   // chave pública (publishable): pode ficar no código
     SHEETS_WEBHOOK_URL: ''   // URL do Apps Script que grava na planilha
   };
 
@@ -3356,6 +3355,19 @@ var qrcode = function() {
       return 'VQV-' + s;
     }
 
+    // ---------- Inscrições abertas ou encerradas (interruptor do painel admin) ----------
+    var jaInscrito = false;
+    function consultarAbertura(){
+      if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) return Promise.resolve(true);
+      return fetch(CONFIG.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/evento_config?id=eq.1&select=inscricoes_abertas', {
+        headers:{'apikey':CONFIG.SUPABASE_ANON_KEY}
+      }).then(function(res){ return res.ok ? res.json() : null; })
+        .then(function(l){ return !(l && l[0] && l[0].inscricoes_abertas === false); })
+        .catch(function(){ return true; });
+    }
+    function mostrarEncerradas(){ form.hidden = true; closed.hidden = false; }
+    consultarAbertura().then(function(aberta){ if (!aberta && !jaInscrito) mostrarEncerradas(); });
+
     // ---------- Gravação (Supabase + planilha) ----------
     function salvar(dados){
       if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
@@ -3364,7 +3376,7 @@ var qrcode = function() {
       }
       return fetch(CONFIG.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/inscricoes', {
         method:'POST',
-        headers:{'apikey':CONFIG.SUPABASE_ANON_KEY,'Authorization':'Bearer ' + CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
+        headers:{'apikey':CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
         body: JSON.stringify(dados)
       }).then(function(res){
         if (!res.ok) return res.text().then(function(t){ throw new Error(t || res.status); });
@@ -3409,15 +3421,18 @@ var qrcode = function() {
         mostrarConfirmacao({codigo:dados.codigo, nome:dados.nome, empresa:dados.empresa}, true);
       }).catch(function(err){
         console.error(err);
-        errorBox.textContent = 'Não foi possível enviar sua inscrição agora. Verifique sua conexão e tente novamente.';
-        errorBox.hidden = false;
+        return consultarAbertura().then(function(aberta){
+          if (!aberta){ mostrarEncerradas(); return; }
+          errorBox.textContent = 'Não foi possível enviar sua inscrição agora. Verifique sua conexão e tente novamente.';
+          errorBox.hidden = false;
+        });
       }).then(function(){
         submitBtn.disabled = false; submitBtn.textContent = 'Enviar minha inscrição';
       });
     });
 
     function mostrarConfirmacao(p, rolar){
-      participante = p;
+      participante = p; jaInscrito = true; closed.hidden = true;
       form.hidden = true; done.hidden = false;
       document.getElementById('doneTitle').textContent = 'Inscrição confirmada, ' + p.nome.split(' ')[0] + '!';
       prontoParaDesenhar().then(function(){ desenharIngresso(); desenharStory(); });
@@ -3592,8 +3607,11 @@ var qrcode = function() {
         try { localStorage.removeItem(CHAVE); } catch(e){}
         form.reset(); foto = null; document.getElementById('storyPhoto').value = '';
         form.querySelectorAll('.other-input').forEach(function(i){ i.hidden = true; }); promoField.hidden = true;
-        done.hidden = true; form.hidden = false; outro.remove();
-        form.scrollIntoView({behavior:'smooth', block:'start'});
+        done.hidden = true; outro.remove(); jaInscrito = false;
+        consultarAbertura().then(function(aberta){
+          if (aberta) form.hidden = false; else mostrarEncerradas();
+          (aberta ? form : closed).scrollIntoView({behavior:'smooth', block:'start'});
+        });
       });
       done.appendChild(outro);
     }
