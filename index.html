@@ -878,6 +878,7 @@
               <div class="story-actions">
                 <label class="btn btn-ghost file-btn">Escolher minha foto<input type="file" id="storyPhoto" accept="image/*"></label>
                 <button type="button" class="btn btn-primary" id="dlStory">Baixar arte</button>
+                <button type="button" class="btn btn-primary" id="shareStory" hidden>Compartilhar</button>
               </div>
               <p class="adjust-hint" id="photoAdjust" hidden><b>Dica:</b> arraste a foto na arte para ajustar o enquadramento. Para aproximar ou afastar, use dois dedos ou a rodinha do mouse.</p>
             </div>
@@ -3674,7 +3675,43 @@ var qrcode = function() {
     }
     function slug(s){ return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
     document.getElementById('dlTicket').addEventListener('click', function(){ baixar(ticketCanvas, 'ingresso-varejo-que-vende-' + slug(participante.nome) + '.png'); });
-    document.getElementById('dlStory').addEventListener('click', function(){ baixar(storyCanvas, 'eu-vou-varejo-que-vende-' + slug(participante.nome) + '.png'); });
+    document.getElementById('dlStory').addEventListener('click', function(){
+      baixar(storyCanvas, 'eu-vou-varejo-que-vende-' + slug(participante.nome) + '.png');
+      registrarDivulgacao('baixou_arte');
+    });
+
+    // Botão Compartilhar: abre a janela de compartilhamento do celular já com a imagem.
+    // Só aparece nos navegadores que permitem compartilhar arquivos (a maioria dos celulares).
+    var btnShare = document.getElementById('shareStory');
+    function podeCompartilharArquivo(){
+      try { return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [new File([''], 'teste.png', { type: 'image/png' })] })); }
+      catch(e){ return false; }
+    }
+    // Converte a arte em arquivo sem esperar, para o navegador aceitar o compartilhamento no mesmo toque
+    function arteComoArquivo(){
+      var dados = storyCanvas.toDataURL('image/png').split(',')[1], bin = atob(dados), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new File([bytes], 'eu-vou-varejo-que-vende-' + slug(participante.nome) + '.png', { type: 'image/png' });
+    }
+    if (podeCompartilharArquivo()) btnShare.hidden = false;
+    btnShare.addEventListener('click', function(){
+      if (!participante) return;
+      var arq = arteComoArquivo();
+      if (!navigator.canShare({ files: [arq] })){ baixar(storyCanvas, arq.name); registrarDivulgacao('baixou_arte'); return; }
+      navigator.share({ files: [arq], title: 'Eu vou! Varejo que Vende' })
+        .then(function(){ registrarDivulgacao('compartilhou_arte'); })
+        .catch(function(){});
+    });
+
+    // Registra no Supabase que o participante baixou ou compartilhou a arte (só para acompanhamento)
+    function registrarDivulgacao(acao){
+      if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY || !participante || !participante.codigo) return;
+      fetch(CONFIG.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/divulgacao', {
+        method:'POST',
+        headers:{'apikey':CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
+        body: JSON.stringify({ codigo: participante.codigo, acao: acao })
+      }).catch(function(){});
+    }
 
     function linkNovaInscricao(){
       if (done.querySelector('.done-other')) return;
