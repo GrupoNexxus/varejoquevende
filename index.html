@@ -443,6 +443,10 @@
   .story-wrap canvas{border-radius:18px;box-shadow:0 24px 50px -20px rgba(0,0,0,.8)}
   .story-actions{display:flex;flex-wrap:wrap;gap:10px}
   .story-actions .btn{flex:1 1 auto;padding:13px 18px;font-size:.95rem}
+  .adjust-hint{font-size:.88rem;color:var(--muted);margin:0}
+  .adjust-hint b{color:#1CD47E}
+  #storyCanvas.movable{cursor:grab;touch-action:none}
+  #storyCanvas.movable:active{cursor:grabbing}
   .file-btn{position:relative;overflow:hidden}
   .file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer}
   .done-other{margin-top:18px;font-size:.9rem;color:var(--muted)}
@@ -861,11 +865,6 @@
         </div>
 
         <div class="done-grid">
-          <div class="done-card">
-            <h4>Seu ingresso</h4>
-            <canvas id="ticketCanvas" width="1200" height="560" aria-label="Ingresso do evento com QR Code"></canvas>
-            <button type="button" class="btn btn-primary" id="dlTicket">Baixar ingresso</button>
-          </div>
 
           <div class="done-card story-card">
             <div class="story-wrap"><canvas id="storyCanvas" width="1080" height="1920" aria-label="Arte Eu vou para o story"></canvas></div>
@@ -880,7 +879,13 @@
                 <label class="btn btn-ghost file-btn">Escolher minha foto<input type="file" id="storyPhoto" accept="image/*"></label>
                 <button type="button" class="btn btn-primary" id="dlStory">Baixar arte</button>
               </div>
+              <p class="adjust-hint" id="photoAdjust" hidden><b>Dica:</b> arraste a foto na arte para ajustar o enquadramento. Para aproximar ou afastar, use dois dedos ou a rodinha do mouse.</p>
             </div>
+          </div>
+          <div class="done-card">
+            <h4>Seu ingresso</h4>
+            <canvas id="ticketCanvas" width="1200" height="560" aria-label="Ingresso do evento com QR Code"></canvas>
+            <button type="button" class="btn btn-primary" id="dlTicket">Baixar ingresso</button>
           </div>
         </div>
       </div>
@@ -3307,11 +3312,26 @@ var qrcode = function() {
     form.elements.segmento.addEventListener('change', function(){ alternar(this, form.elements.segmento_outro); if (!form.elements.segmento_outro.hidden) form.elements.segmento_outro.focus(); });
     form.elements.origem.addEventListener('change', function(){ alternar(this, form.elements.origem_outro); if (!form.elements.origem_outro.hidden) form.elements.origem_outro.focus(); });
     var promoField = document.getElementById('promoField');
-    form.querySelectorAll('input[name="pagamento"]').forEach(function(r){
+    var promoRadio = form.querySelector('input[name="pagamento"][value="Código promocional"]');
+    function ehCliente(){ var c = form.querySelector('input[name="cliente_f5"]:checked'); return !!c && c.value === 'Sim'; }
+    // Mostra ou esconde o campo do código conforme a forma de pagamento
+    function atualizarPromo(){
+      var promo = promoRadio.checked, campo = form.elements.codigo_promocional;
+      promoField.hidden = !promo;
+      if (!promo){ campo.value = ''; promoField.classList.remove('invalid'); return; }
+      if (ehCliente()){ campo.value = '#ClienteF5'; promoField.classList.remove('invalid'); }
+      else campo.focus();
+    }
+    form.querySelectorAll('input[name="pagamento"]').forEach(function(r){ r.addEventListener('change', atualizarPromo); });
+
+    // Cliente F5: seleciona o código promocional e preenche #ClienteF5 automaticamente
+    form.querySelectorAll('input[name="cliente_f5"]').forEach(function(r){
       r.addEventListener('change', function(){
-        var promo = r.value === 'Código promocional' && r.checked;
-        promoField.hidden = !promo;
-        if (promo) form.elements.codigo_promocional.focus(); else { form.elements.codigo_promocional.value = ''; promoField.classList.remove('invalid'); }
+        if (!r.checked) return;
+        if (r.value === 'Sim') promoRadio.checked = true;
+        else if (promoRadio.checked) promoRadio.checked = false;
+        form.querySelector('[data-group="pagamento"]').classList.remove('invalid');
+        atualizarPromo();
       });
     });
 
@@ -3553,9 +3573,10 @@ var qrcode = function() {
       ctx.beginPath(); ctx.arc(cx, cy, r + 14, 0, Math.PI*2); ctx.fillStyle = C.green; ctx.fill();
       ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.clip();
       if (foto) {
-        var esc = Math.max(2*r / foto.naturalWidth, 2*r / foto.naturalHeight);
+        var esc = Math.max(2*r / foto.naturalWidth, 2*r / foto.naturalHeight) * ajuste.zoom;
         var fw = foto.naturalWidth * esc, fh = foto.naturalHeight * esc;
-        ctx.drawImage(foto, cx - fw/2, cy - fh/2, fw, fh);
+        limitarAjuste(fw, fh, r);
+        ctx.drawImage(foto, cx - fw/2 + ajuste.x, cy - fh/2 + ajuste.y, fw, fh);
       } else {
         ctx.fillStyle = C.ink; ctx.fillRect(cx - r, cy - r, 2*r, 2*r);
         var ini = participante.nome.split(/\s+/).filter(Boolean); ini = (ini[0][0] + (ini.length > 1 ? ini[ini.length-1][0] : '')).toUpperCase();
@@ -3585,9 +3606,65 @@ var qrcode = function() {
     document.getElementById('storyPhoto').addEventListener('change', function(e){
       var arq = e.target.files && e.target.files[0]; if (!arq) return;
       var leitor = new FileReader();
-      leitor.onload = function(){ var img = new Image(); img.onload = function(){ foto = img; if (participante) desenharStory(); }; img.src = leitor.result; };
+      leitor.onload = function(){ var img = new Image(); img.onload = function(){ foto = img; zerarAjuste(); if (participante) desenharStory(); }; img.src = leitor.result; };
       leitor.readAsDataURL(arq);
     });
+
+    // ---------- Enquadramento da foto ----------
+    var ajuste = { zoom: 1, x: 0, y: 0 };
+    var painelAjuste = document.getElementById('photoAdjust');
+    function zerarAjuste(){
+      ajuste = { zoom: 1, x: 0, y: 0 };
+      painelAjuste.hidden = !foto; storyCanvas.classList.toggle('movable', !!foto);
+    }
+    // Impede que a foto saia do círculo e deixe um espaço vazio
+    function limitarAjuste(fw, fh, r){
+      var mx = Math.max(0, fw/2 - r), my = Math.max(0, fh/2 - r);
+      ajuste.x = Math.min(mx, Math.max(-mx, ajuste.x));
+      ajuste.y = Math.min(my, Math.max(-my, ajuste.y));
+    }
+    var quadroPendente = false;
+    function redesenhar(){
+      if (quadroPendente || !participante) return;
+      quadroPendente = true;
+      requestAnimationFrame(function(){ quadroPendente = false; desenharStory(); });
+    }
+    function mudarZoom(z){ ajuste.zoom = Math.min(3, Math.max(1, z)); redesenhar(); }
+
+    // Arrastar com um dedo (ou mouse) e aproximar com dois dedos, na própria arte
+    var toques = {}, pinca = null;
+    function listaToques(){ return Object.keys(toques).map(function(k){ return toques[k]; }); }
+    function distancia(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+    storyCanvas.addEventListener('pointerdown', function(e){
+      if (!foto) return;
+      toques[e.pointerId] = { x: e.clientX, y: e.clientY };
+      storyCanvas.setPointerCapture(e.pointerId); e.preventDefault();
+      var l = listaToques();
+      pinca = l.length === 2 ? { d: distancia(l[0], l[1]), zoom: ajuste.zoom } : null;
+    });
+    storyCanvas.addEventListener('pointermove', function(e){
+      var t = toques[e.pointerId]; if (!t) return;
+      var escala = storyCanvas.width / storyCanvas.getBoundingClientRect().width;
+      if (pinca){
+        t.x = e.clientX; t.y = e.clientY;
+        var l = listaToques();
+        if (l.length === 2 && pinca.d > 0) mudarZoom(pinca.zoom * distancia(l[0], l[1]) / pinca.d);
+        return;
+      }
+      ajuste.x += (e.clientX - t.x) * escala;
+      ajuste.y += (e.clientY - t.y) * escala;
+      t.x = e.clientX; t.y = e.clientY;
+      redesenhar();
+    });
+    ['pointerup','pointercancel'].forEach(function(ev){
+      storyCanvas.addEventListener(ev, function(e){ delete toques[e.pointerId]; pinca = null; });
+    });
+    // No computador, a rodinha do mouse também aproxima e afasta
+    storyCanvas.addEventListener('wheel', function(e){
+      if (!foto) return;
+      e.preventDefault();
+      mudarZoom(ajuste.zoom - e.deltaY * 0.0015);
+    }, { passive: false });
 
     function baixar(canvas, nome){
       canvas.toBlob(function(blob){
@@ -3605,7 +3682,7 @@ var qrcode = function() {
       outro.innerHTML = 'Quer inscrever outra pessoa? <button type="button">Fazer nova inscrição</button>';
       outro.querySelector('button').addEventListener('click', function(){
         try { localStorage.removeItem(CHAVE); } catch(e){}
-        form.reset(); foto = null; document.getElementById('storyPhoto').value = '';
+        form.reset(); foto = null; zerarAjuste(); document.getElementById('storyPhoto').value = '';
         form.querySelectorAll('.other-input').forEach(function(i){ i.hidden = true; }); promoField.hidden = true;
         done.hidden = true; outro.remove(); jaInscrito = false;
         consultarAbertura().then(function(aberta){
