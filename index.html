@@ -3698,9 +3698,9 @@ var qrcode = function() {
       if (!participante) return;
       var arq = arteComoArquivo();
       if (!navigator.canShare({ files: [arq] })){ baixar(storyCanvas, arq.name); registrarDivulgacao('baixou_arte'); return; }
-      navigator.share({ files: [arq], title: 'Eu vou! Varejo que Vende' })
-        .then(function(){ registrarDivulgacao('compartilhou_arte'); })
-        .catch(function(){});
+      // Registra ao abrir o compartilhamento: alguns celulares não avisam a página quando o envio termina
+      registrarDivulgacao('compartilhou_arte');
+      navigator.share({ files: [arq], title: 'Eu vou! Varejo que Vende' }).catch(function(){});
     });
 
     // Registra no Supabase que o participante baixou ou compartilhou a arte (só para acompanhamento)
@@ -3709,8 +3709,11 @@ var qrcode = function() {
       fetch(CONFIG.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/divulgacao', {
         method:'POST',
         headers:{'apikey':CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
-        body: JSON.stringify({ codigo: participante.codigo, acao: acao })
-      }).catch(function(){});
+        body: JSON.stringify({ codigo: participante.codigo, acao: acao }),
+        keepalive: true   // garante o envio mesmo se o celular trocar de app logo em seguida
+      }).then(function(res){
+        if (!res.ok) res.text().then(function(t){ console.warn('[Arte] Registro não gravado:', res.status, t); });
+      }).catch(function(e){ console.warn('[Arte] Falha de conexão ao registrar:', e); });
     }
 
     function linkNovaInscricao(){
