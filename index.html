@@ -3466,11 +3466,30 @@ var qrcode = function() {
       var pg = form.querySelector('input[name="pagamento"]:checked');
       if (!pg) marcar(form.querySelector('[data-group="pagamento"]'), f, 'pagamento');
       if (pg && pg.value === 'Código promocional') {
-        var cod = E.codigo_promocional.value.trim().replace(/^#/,'').toLowerCase();
-        if (cod !== 'clientef5') { marcar(promoField, f, 'promo'); f.promoInvalido = !!cod; }
+        if (!normalizarCodigo(E.codigo_promocional.value)) marcar(promoField, f, 'promo');
       }
       if (!E.consentimento.checked) marcar(form.querySelector('.consent'), f, 'consentimento');
       return f;
+    }
+
+    // ---------- Códigos promocionais (cadastrados no painel admin) ----------
+    function normalizarCodigo(v){ return String(v || '').trim().replace(/^#+/,'').trim(); }
+    // Pergunta ao Supabase se o código existe e está ativo.
+    // Devolve o código como foi cadastrado, null se for inválido, ou undefined se não deu para consultar.
+    function validarCodigo(cod){
+      if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) return Promise.resolve(cod.toLowerCase() === 'clientef5' ? 'ClienteF5' : null);
+      return fetch(CONFIG.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/rpc/validar_codigo_promocional', {
+        method:'POST',
+        headers:{'apikey':CONFIG.SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+        body: JSON.stringify({p_codigo: cod})
+      }).then(function(res){ return res.ok ? res.json() : undefined; })
+        .catch(function(){ return undefined; });
+    }
+    function codigoInvalido(){
+      promoField.classList.add('invalid');
+      errorBox.textContent = 'Código promocional inválido. Confira e tente novamente.';
+      errorBox.hidden = false;
+      form.elements.codigo_promocional.focus();
     }
 
     function gerarCodigo(){
@@ -3517,7 +3536,7 @@ var qrcode = function() {
       errorBox.hidden = true;
       var faltando = validar();
       if (faltando.length) {
-        errorBox.textContent = faltando.promoInvalido && faltando.length === 1 ? 'Código promocional inválido. Confira e tente novamente.' : 'Confira os campos destacados antes de enviar.';
+        errorBox.textContent = 'Confira os campos destacados antes de enviar.';
         errorBox.hidden = false;
         var primeiro = form.querySelector('.invalid input, .invalid select');
         if (primeiro) primeiro.focus();
@@ -3537,15 +3556,25 @@ var qrcode = function() {
         origem: E.origem.value === 'Outro' ? 'Outro: ' + E.origem_outro.value.trim() : E.origem.value,
         cliente_f5: form.querySelector('input[name="cliente_f5"]:checked').value === 'Sim',
         forma_pagamento: pagamento,
-        codigo_promocional: pagamento === 'Código promocional' ? '#ClienteF5' : null,
+        codigo_promocional: pagamento === 'Código promocional' ? '#' + normalizarCodigo(E.codigo_promocional.value) : null,
         consentimento: true
       };
       submitBtn.disabled = true; submitBtn.textContent = 'Enviando inscrição...';
-      salvar(dados).then(function(){
+      var checagem = pagamento === 'Código promocional'
+        ? validarCodigo(normalizarCodigo(E.codigo_promocional.value))
+        : Promise.resolve(true);
+      checagem.then(function(valido){
+        if (valido === null || valido === false) { var e = new Error('codigo'); e.codigoInvalido = true; throw e; }
+        // Grava o código como foi cadastrado no painel (ex.: #ClienteF5)
+        if (typeof valido === 'string') dados.codigo_promocional = '#' + valido;
+        return salvar(dados);
+      }).then(function(){
         try { localStorage.setItem(CHAVE, JSON.stringify({codigo:dados.codigo, nome:dados.nome, empresa:dados.empresa})); } catch(e){}
         mostrarConfirmacao({codigo:dados.codigo, nome:dados.nome, empresa:dados.empresa}, true);
       }).catch(function(err){
         console.error(err);
+        // Código recusado na checagem ou pelo próprio Supabase
+        if (err && (err.codigoInvalido || /codigo_promocional_invalido/.test(err.message || ''))) { codigoInvalido(); return; }
         return consultarAbertura().then(function(aberta){
           if (!aberta){ mostrarEncerradas(); return; }
           errorBox.textContent = 'Não foi possível enviar sua inscrição agora. Verifique sua conexão e tente novamente.';
