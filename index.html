@@ -570,6 +570,21 @@
     .apoio-div{height:40px}
   }
 </style>
+<!-- Código do Pixel da Meta -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '1428337852738927'); // <<< troque pelo ID do Pixel (somente números)
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=SEU_PIXEL_ID&ev=PageView&noscript=1"/></noscript>
+<!-- Encerrar código do Pixel da Meta -->
 </head>
 <body>
 
@@ -3571,6 +3586,8 @@ var qrcode = function() {
       }).then(function(){
         try { localStorage.setItem(CHAVE, JSON.stringify({codigo:dados.codigo, nome:dados.nome, empresa:dados.empresa})); } catch(e){}
         mostrarConfirmacao({codigo:dados.codigo, nome:dados.nome, empresa:dados.empresa}, true);
+        // Meta Pixel: conta a conversão só quando a inscrição foi salva com sucesso
+        try { if (window.fbq) fbq('track', 'CompleteRegistration', {content_name: 'Varejo que Vende'}); } catch(e){}
       }).catch(function(err){
         console.error(err);
         // Código recusado na checagem ou pelo próprio Supabase
